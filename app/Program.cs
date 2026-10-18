@@ -28,12 +28,18 @@ internal static class Program
 
 internal sealed class PatcherForm : Form
 {
-    private const string VrcxReleaseApi = "https://api.github.com/repos/Natsumi-sama/VRCX/releases/latest";
     private const string FewTagsBaseUrl = "https://raw.githubusercontent.com/Fewdys/FewTags/main/";
     private const string DataMarker = "<!-- FEWTAGS_DATA_PLACEHOLDER -->";
     private const int MaxDatabaseBytes = 32 * 1024 * 1024;
     private const int MaxUpdaterBytes = 128 * 1024 * 1024;
     private static readonly HttpClient Http = CreateHttpClient();
+    private static readonly PayloadVariant[] PayloadVariants =
+    {
+        new("Nightly", PatcherBuildInfo.VrcxNightlyReleaseTag, PatcherBuildInfo.VrcxNightlyPackageVersion,
+            PatcherBuildInfo.VrcxNightlyExeSha256, PatcherBuildInfo.VrcxNightlyDllSha256, "VRCX-FewTags-html-nightly.zip"),
+        new("Stable", PatcherBuildInfo.VrcxStableReleaseTag, PatcherBuildInfo.VrcxStablePackageVersion,
+            PatcherBuildInfo.VrcxStableExeSha256, PatcherBuildInfo.VrcxStableDllSha256, "VRCX-FewTags-html-stable.zip")
+    };
 
     private readonly TextBox _path = new() { Anchor = AnchorStyles.Left | AnchorStyles.Right };
     private readonly Label _status = new() { AutoSize = false, Height = 58, TextAlign = ContentAlignment.MiddleLeft };
@@ -60,7 +66,7 @@ internal sealed class PatcherForm : Form
         };
         var subtitle = new Label
         {
-            Text = $"VRCX {PatcherBuildInfo.VrcxReleaseTag} · patcher {PatcherBuildInfo.PatcherVersion}",
+            Text = $"Nightly {PatcherBuildInfo.VrcxNightlyReleaseTag} + Stable {PatcherBuildInfo.VrcxStableReleaseTag} · patcher {PatcherBuildInfo.PatcherVersion}",
             AutoSize = true,
             Left = 19,
             Top = 47
@@ -113,8 +119,8 @@ internal sealed class PatcherForm : Form
         var stage = Path.Combine(Path.GetTempPath(), "VRCX-FewTags-" + Guid.NewGuid().ToString("N"));
         try
         {
-            _status.Text = "Checking the VRCX release and installed version…";
-            await EnsurePayloadSupportsLatestAsync(target);
+            _status.Text = "Matching the installed VRCX executable to a compatible frontend…";
+            var variant = ResolveCompatiblePayload(target);
 
             _status.Text = "Downloading and validating the latest FewTags databases…";
             var v2Bytes = await DownloadDatabaseAsync("FewTagsv2.json");
@@ -129,7 +135,7 @@ internal sealed class PatcherForm : Form
 
             Directory.CreateDirectory(stage);
             var archivePath = Path.Combine(stage, "payload.zip");
-            await ExtractEmbeddedPayloadAsync(archivePath);
+            await ExtractEmbeddedPayloadAsync(archivePath, variant.ResourceName);
             var payloadRoot = Path.Combine(stage, "payload");
             Directory.CreateDirectory(payloadRoot);
             ZipFile.ExtractToDirectory(archivePath, payloadRoot);
@@ -179,9 +185,9 @@ internal sealed class PatcherForm : Form
                 throw;
             }
 
-            _status.Text = $"FewTags applied. Updated {changedFiles.Count} files; backup saved to {Path.GetFileName(backupPath)}.";
+            _status.Text = $"FewTags applied to the {variant.Channel} build. Updated {changedFiles.Count} files; backup saved to {Path.GetFileName(backupPath)}.";
             MessageBox.Show(this,
-                $"FewTags was applied to the selected VRCX installation.\n\nUpdated files: {changedFiles.Count}\nBackup: {backupPath}\n\nRelaunch VRCX to see the tags.",
+                $"FewTags was applied to the selected VRCX {variant.Channel} build ({variant.ReleaseTag}).\n\nUpdated files: {changedFiles.Count}\nBackup: {backupPath}\n\nRelaunch VRCX to see the tags.",
                 "VRCX updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
@@ -205,7 +211,19 @@ internal sealed class PatcherForm : Form
             return;
         }
         var backup = Directory.Exists(target)
-            ? Directory.EnumerateDirectories(target, "FewTagsVRCXExeBackup-*").OrderByDescending(Path.GetFileName, StringComparer.Ordinal).FirstOrDefault()
+            ? Directory.EnumerateDirectories(target)
+                .Where(path =>
+                {
+                    var name = Path.GetFileName(path);
+                    var recognized = name.StartsWith("FewTagsVRCXExeBackup-", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("FewTagsVRCXBackup-", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("FewTagsVRCXScriptBackup-", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("FewTagsPatchBackup-", StringComparison.OrdinalIgnoreCase);
+                    return recognized && (File.Exists(Path.Combine(path, "manifest.json")) ||
+                        File.Exists(Path.Combine(path, "html", "index.html")));
+                })
+                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault()
             : null;
         if (backup is null)
         {
@@ -214,7 +232,10 @@ internal sealed class PatcherForm : Form
         }
         try
         {
-            RestoreBackup(backup, Path.Combine(target, "html"));
+            if (File.Exists(Path.Combine(backup, "manifest.json")))
+                RestoreBackup(backup, Path.Combine(target, "html"));
+            else
+                RestoreWholeHtmlBackup(backup, target);
             _status.Text = $"Restored {Path.GetFileName(backup)}. Relaunch VRCX.";
             MessageBox.Show(this, $"Restored the frontend from:\n{backup}", "Restore complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -252,30 +273,32 @@ internal sealed class PatcherForm : Form
         return null;
     }
 
-    private static async Task EnsurePayloadSupportsLatestAsync(string target)
+    private static PayloadVariant ResolveCompatiblePayload(string target)
     {
-        using var response = await Http.GetAsync(VrcxReleaseApi);
-        response.EnsureSuccessStatusCode();
-        using var release = JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
-        var latestTag = release.RootElement.GetProperty("tag_name").GetString() ?? string.Empty;
-        if (TryReleaseTime(latestTag, out var latestTime) && TryReleaseTime(PatcherBuildInfo.VrcxReleaseTag, out var payloadTime) && latestTime > payloadTime)
-            throw new InvalidOperationException($"A newer VRCX release ({latestTag}) exists than this patcher's frontend ({PatcherBuildInfo.VrcxReleaseTag}). Wait for a compatible patcher update before applying.");
-        if (!TryReleaseTime(latestTag, out _) && !string.Equals(latestTag, PatcherBuildInfo.VrcxReleaseTag, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The latest VRCX release could not be compared safely with the frontend included in this patcher.");
+        var exePath = Path.Combine(target, "VRCX.exe");
+        var dllPath = Path.Combine(target, "VRCX.dll");
+        if (!File.Exists(exePath) || !File.Exists(dllPath))
+            throw new InvalidDataException("This VRCX install is missing VRCX.exe or VRCX.dll, so its frontend build cannot be matched safely.");
 
-        var versionPath = Path.Combine(target, "Version");
-        var installedVersionText = File.Exists(versionPath) ? File.ReadAllText(versionPath).Trim() : string.Empty;
-        if (Version.TryParse(installedVersionText, out var installedVersion) &&
-            Version.TryParse(PatcherBuildInfo.VrcxPackageVersion, out var payloadVersion) && installedVersion > payloadVersion)
-            throw new InvalidOperationException($"This installation is VRCX {installedVersion}, newer than the patcher's frontend ({payloadVersion}). The patch was stopped to avoid a downgrade.");
+        var exeHash = HashFile(exePath);
+        var dllHash = HashFile(dllPath);
+        var matches = PayloadVariants.Where(variant =>
+            string.Equals(variant.ExeSha256, exeHash, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(variant.DllSha256, dllHash, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matches.Length == 1) return matches[0];
+
+        var supported = string.Join("\n", PayloadVariants.Select(variant =>
+            $"• {variant.Channel}: {variant.ReleaseTag} (VRCX package {variant.PackageVersion})"));
+        throw new InvalidOperationException(
+            $"This VRCX executable does not match either bundled frontend. No files were changed.\n\n" +
+            $"Detected VRCX.exe SHA-256: {exeHash}\nDetected VRCX.dll SHA-256: {dllHash}\n\n" +
+            $"This patcher supports these exact builds:\n{supported}\n\nUpdate VRCX to one of those releases, then apply again.");
     }
 
-    private static bool TryReleaseTime(string tag, out DateTime time)
+    private static string HashFile(string path)
     {
-        var match = Regex.Match(tag, @"^(\d{4}-\d{2}-\d{2}T\d{2})\.(\d{2})-");
-        return DateTime.TryParseExact(match.Success ? match.Groups[1].Value + ":" + match.Groups[2].Value : string.Empty,
-            "yyyy-MM-dd'T'HH:mm", System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.AssumeUniversal, out time);
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream));
     }
 
     private static async Task<byte[]> DownloadDatabaseAsync(string fileName)
@@ -359,6 +382,46 @@ internal sealed class PatcherForm : Form
                 File.Copy(saved, destination, overwrite: true);
             }
             else if (File.Exists(destination)) File.Delete(destination);
+        }
+    }
+
+    private static void RestoreWholeHtmlBackup(string backupPath, string installRoot)
+    {
+        var savedHtml = Path.Combine(backupPath, "html");
+        var destination = Path.Combine(installRoot, "html");
+        if (!File.Exists(Path.Combine(savedHtml, "index.html")))
+            throw new InvalidDataException("The selected full frontend backup is incomplete.");
+
+        var stage = Path.Combine(installRoot, "FewTagsVRCXRestoreStage-" + Guid.NewGuid().ToString("N"));
+        var displaced = Path.Combine(installRoot, "FewTagsVRCXBeforeRestore-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
+        Directory.CreateDirectory(stage);
+        try
+        {
+            foreach (var source in Directory.EnumerateFiles(savedHtml, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(savedHtml, source);
+                var staged = SafeCombine(stage, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+                File.Copy(source, staged, overwrite: true);
+            }
+            if (!File.Exists(Path.Combine(stage, "index.html")))
+                throw new InvalidDataException("The staged frontend backup is incomplete.");
+            Directory.Move(destination, displaced);
+            try
+            {
+                Directory.Move(stage, destination);
+            }
+            catch
+            {
+                if (Directory.Exists(destination))
+                    Directory.Move(destination, Path.Combine(installRoot, "FewTagsVRCXRestoreFailed-" + Guid.NewGuid().ToString("N")));
+                Directory.Move(displaced, destination);
+                throw;
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(stage)) Directory.Delete(stage, recursive: true); } catch { }
         }
     }
 
@@ -460,9 +523,9 @@ internal sealed class PatcherForm : Form
         return output.ToArray();
     }
 
-    private static async Task ExtractEmbeddedPayloadAsync(string destination)
+    private static async Task ExtractEmbeddedPayloadAsync(string destination, string resourceName)
     {
-        await using var input = typeof(PatcherForm).Assembly.GetManifestResourceStream("VRCX-FewTags-html.zip")
+        await using var input = typeof(PatcherForm).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException("The VRCX frontend payload is missing from this patcher.");
         await using var output = File.Create(destination);
         await input.CopyToAsync(output);
@@ -476,6 +539,7 @@ internal sealed class PatcherForm : Form
         _path.Enabled = !busy;
     }
 
+    private sealed record PayloadVariant(string Channel, string ReleaseTag, string PackageVersion, string ExeSha256, string DllSha256, string ResourceName);
     private sealed record PayloadFile(string SourcePath, string RelativePath);
     private sealed record BackupEntry(string RelativePath, bool HadOriginal);
 }
@@ -509,13 +573,31 @@ internal static class SelfUpdater
     public static bool IsNewerPatcherTag(string? candidate, string current)
     {
         if (string.IsNullOrWhiteSpace(candidate)) return false;
-        var candidateMatch = Regex.Match(candidate, @"^vrcx-fewtags-(?<release>\d{4}-\d{2}-\d{2}T\d{2}\.\d{2}-[0-9a-f]{7,})-(?<source>[0-9a-f]{8})$", RegexOptions.IgnoreCase);
-        var currentMatch = Regex.Match(current, @"^vrcx-fewtags-(?<release>\d{4}-\d{2}-\d{2}T\d{2}\.\d{2}-[0-9a-f]{7,})-(?<source>[0-9a-f]{8})$", RegexOptions.IgnoreCase);
-        if (!candidateMatch.Success || !currentMatch.Success) return false;
-        if (!TryReleaseTime(candidateMatch.Groups["release"].Value, out var candidateTime) ||
-            !TryReleaseTime(currentMatch.Groups["release"].Value, out var currentTime)) return false;
-        return candidateTime > currentTime || (candidateTime == currentTime &&
-            !string.Equals(candidateMatch.Groups["source"].Value, currentMatch.Groups["source"].Value, StringComparison.OrdinalIgnoreCase));
+        if (!TryParsePatcherTag(candidate, out var candidateNightly, out var candidateStable, out var candidateSource) ||
+            !TryParsePatcherTag(current, out var currentNightly, out var currentStable, out var currentSource)) return false;
+        if (candidateNightly != currentNightly) return candidateNightly > currentNightly;
+        if (candidateStable != currentStable) return candidateStable > currentStable;
+        return !string.Equals(candidateSource, currentSource, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParsePatcherTag(string value, out DateTime nightly, out DateTime stable, out string source)
+    {
+        nightly = default;
+        stable = DateTime.MinValue;
+        source = string.Empty;
+        var currentFormat = Regex.Match(value,
+            @"^vrcx-fewtags-(?<nightly>\d{4}-\d{2}-\d{2}T\d{2}\.\d{2}-[0-9a-f]{7,})-(?<stable>v?\d{4}\.\d{2}\.\d{2})-(?<source>[0-9a-f]{8})$",
+            RegexOptions.IgnoreCase);
+        var previousFormat = Regex.Match(value,
+            @"^vrcx-fewtags-(?<nightly>\d{4}-\d{2}-\d{2}T\d{2}\.\d{2}-[0-9a-f]{7,})-(?<source>[0-9a-f]{8})$",
+            RegexOptions.IgnoreCase);
+        var match = currentFormat.Success ? currentFormat : previousFormat;
+        if (!match.Success || !TryReleaseTime(match.Groups["nightly"].Value, out nightly)) return false;
+        if (currentFormat.Success && !DateTime.TryParseExact(currentFormat.Groups["stable"].Value.TrimStart('v', 'V'),
+                "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out stable)) return false;
+        source = match.Groups["source"].Value;
+        return true;
     }
 
     private static bool TryReleaseTime(string tag, out DateTime time)

@@ -11,18 +11,26 @@
     <RootNamespace>VRCXFewTagsPatcher</RootNamespace>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <VrcxReleaseTag Condition="'$(VrcxReleaseTag)' == ''">2026-10-18T13.40-d8619fb</VrcxReleaseTag>
-    <VrcxPackageVersion Condition="'$(VrcxPackageVersion)' == ''">2026.09.16</VrcxPackageVersion>
+    <VrcxNightlyReleaseTag Condition="'$(VrcxNightlyReleaseTag)' == ''">2026-10-18T13.40-d8619fb</VrcxNightlyReleaseTag>
+    <VrcxStableReleaseTag Condition="'$(VrcxStableReleaseTag)' == ''">v2026.09.16</VrcxStableReleaseTag>
+    <VrcxNightlyPackageVersion Condition="'$(VrcxNightlyPackageVersion)' == ''">2026.09.16</VrcxNightlyPackageVersion>
+    <VrcxStablePackageVersion Condition="'$(VrcxStablePackageVersion)' == ''">2026.07.18</VrcxStablePackageVersion>
+    <VrcxNightlyExeSha256 Condition="'$(VrcxNightlyExeSha256)' == ''">5267f1c7ef0f2bc5f3dc84b8feded2011530078b2e26c1bbb3da118fdf086744</VrcxNightlyExeSha256>
+    <VrcxNightlyDllSha256 Condition="'$(VrcxNightlyDllSha256)' == ''">a9c4103796ab732cf29811dae1950472267518954ff2455f23c35274c6002e0b</VrcxNightlyDllSha256>
+    <VrcxStableExeSha256 Condition="'$(VrcxStableExeSha256)' == ''">1379c9505d7a674cab545b8e34dd215f36947aefcb3b902985f32e785766ca8c</VrcxStableExeSha256>
+    <VrcxStableDllSha256 Condition="'$(VrcxStableDllSha256)' == ''">d1b9e033183cfdf2252ae9c291052f4cfd7f755ae7afdc61faea2b2272310964</VrcxStableDllSha256>
     <PatcherVersion Condition="'$(PatcherVersion)' == ''">v0.1.0-local</PatcherVersion>
     <PatcherRepository Condition="'$(PatcherRepository)' == ''">unset</PatcherRepository>
-    <VrcxPayloadArchive Condition="'$(VrcxPayloadArchive)' == ''">$(MSBuildProjectDirectory)\..\payload\VRCX-html.zip</VrcxPayloadArchive>
+    <NightlyPayloadArchive Condition="'$(NightlyPayloadArchive)' == ''">$(MSBuildProjectDirectory)\..\payload\nightly\VRCX-html.zip</NightlyPayloadArchive>
+    <StablePayloadArchive Condition="'$(StablePayloadArchive)' == ''">$(MSBuildProjectDirectory)\..\payload\stable\VRCX-html.zip</StablePayloadArchive>
   </PropertyGroup>
   <ItemGroup>
-    <EmbeddedResource Include="$(VrcxPayloadArchive)" LogicalName="VRCX-FewTags-html.zip" />
+    <EmbeddedResource Include="$(NightlyPayloadArchive)" LogicalName="VRCX-FewTags-html-nightly.zip" />
+    <EmbeddedResource Include="$(StablePayloadArchive)" LogicalName="VRCX-FewTags-html-stable.zip" />
   </ItemGroup>
   <Target Name="GeneratePatcherBuildInfo" BeforeTargets="CoreCompile">
     <WriteLinesToFile File="$(IntermediateOutputPath)PatcherBuildInfo.g.cs"
-      Lines="namespace VRCXFewTagsPatcher%3B internal static class PatcherBuildInfo { internal const string VrcxReleaseTag = %22$(VrcxReleaseTag)%22%3B internal const string VrcxPackageVersion = %22$(VrcxPackageVersion)%22%3B internal const string PatcherVersion = %22$(PatcherVersion)%22%3B internal const string PatcherRepository = %22$(PatcherRepository)%22%3B }"
+      Lines="namespace VRCXFewTagsPatcher%3B internal static class PatcherBuildInfo { internal const string VrcxNightlyReleaseTag = %22$(VrcxNightlyReleaseTag)%22%3B internal const string VrcxStableReleaseTag = %22$(VrcxStableReleaseTag)%22%3B internal const string VrcxNightlyPackageVersion = %22$(VrcxNightlyPackageVersion)%22%3B internal const string VrcxStablePackageVersion = %22$(VrcxStablePackageVersion)%22%3B internal const string VrcxNightlyExeSha256 = %22$(VrcxNightlyExeSha256)%22%3B internal const string VrcxNightlyDllSha256 = %22$(VrcxNightlyDllSha256)%22%3B internal const string VrcxStableExeSha256 = %22$(VrcxStableExeSha256)%22%3B internal const string VrcxStableDllSha256 = %22$(VrcxStableDllSha256)%22%3B internal const string PatcherVersion = %22$(PatcherVersion)%22%3B internal const string PatcherRepository = %22$(PatcherRepository)%22%3B }"
       Overwrite="true" />
     <ItemGroup>
       <Compile Include="$(IntermediateOutputPath)PatcherBuildInfo.g.cs" />

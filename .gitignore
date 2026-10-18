@@ -1,5 +1,5 @@
 /VRCX-source/
-/payload/*.zip
+/payload/
 /app/bin/
 /app/obj/
 /app/publish/

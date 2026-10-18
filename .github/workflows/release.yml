@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       force_rebuild:
-        description: Rebuild and release even if the VRCX source tag is unchanged
+        description: Rebuild and release even if both VRCX release tags are unchanged
         required: false
         default: false
         type: boolean
@@ -32,12 +32,13 @@ jobs:
     outputs:
       should_publish: ${{ steps.meta.outputs.should_publish }}
       patcher_tag: ${{ steps.meta.outputs.patcher_tag }}
-      vrcx_tag: ${{ steps.meta.outputs.vrcx_tag }}
+      nightly_tag: ${{ steps.meta.outputs.nightly_tag }}
+      stable_tag: ${{ steps.meta.outputs.stable_tag }}
     steps:
       - name: Check out patcher source
         uses: actions/checkout@v4
 
-      - name: Select upstream and patcher versions
+      - name: Select nightly and stable releases
         id: meta
         shell: pwsh
         env:
@@ -45,49 +46,70 @@ jobs:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: |
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'VRCX-FewTags-Patcher-CI'; Accept = 'application/vnd.github+json' }
-          $upstream = Invoke-RestMethod -Uri 'https://api.github.com/repos/Natsumi-sama/VRCX/releases/latest' -Headers $headers
-          $vrcxTag = [string]$upstream.tag_name
-          if ([string]::IsNullOrWhiteSpace($vrcxTag)) { throw 'GitHub returned no VRCX release tag.' }
+          $nightly = Invoke-RestMethod -Uri 'https://api.github.com/repos/Natsumi-sama/VRCX/releases/latest' -Headers $headers
+          $stable = Invoke-RestMethod -Uri 'https://api.github.com/repos/vrcx-team/VRCX/releases/latest' -Headers $headers
+          $nightlyTag = [string]$nightly.tag_name
+          $stableTag = [string]$stable.tag_name
+          if ([string]::IsNullOrWhiteSpace($nightlyTag) -or [string]::IsNullOrWhiteSpace($stableTag)) { throw 'GitHub returned an empty VRCX release tag.' }
+          $nightlyAsset = $nightly.assets | Where-Object { $_.name -match '^VRCX_.*\.zip$' } | Select-Object -First 1
+          $stableAsset = $stable.assets | Where-Object { $_.name -match '^VRCX_.*\.zip$' } | Select-Object -First 1
+          if (-not $nightlyAsset -or -not $stableAsset) { throw 'A VRCX release distribution ZIP could not be found.' }
           $sourceCommit = (git rev-parse HEAD).Trim()
-          $patcherTag = "vrcx-fewtags-$vrcxTag-$($sourceCommit.Substring(0,8))"
+          $patcherTag = "vrcx-fewtags-$nightlyTag-$stableTag-$($sourceCommit.Substring(0,8))"
           $force = $env:FORCE_REBUILD -eq 'true'
           $shouldPublish = $force
           if (-not $force) {
             try {
               $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" -Headers $headers
               $body = [string]$latest.body
-              $hasSameVrcx = $body.Contains("VRCX release: $vrcxTag")
-              $hasSameSource = $body.Contains("Patcher source commit: $sourceCommit")
-              $shouldPublish = -not ($hasSameVrcx -and $hasSameSource)
+              $sameNightly = $body.Contains("Nightly VRCX release: $nightlyTag")
+              $sameStable = $body.Contains("Stable VRCX release: $stableTag")
+              $sameSource = $body.Contains("Patcher source commit: $sourceCommit")
+              $shouldPublish = -not ($sameNightly -and $sameStable -and $sameSource)
             } catch { $shouldPublish = $true }
           }
-          "vrcx_tag=$vrcxTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "nightly_tag=$nightlyTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "stable_tag=$stableTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "nightly_zip_url=$($nightlyAsset.browser_download_url)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "stable_zip_url=$($stableAsset.browser_download_url)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "patcher_tag=$patcherTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "should_publish=$($shouldPublish.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
-          "VRCX release: $vrcxTag`nPatcher source commit: $sourceCommit`nPatcher release tag: $patcherTag" | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          "Nightly VRCX release: $nightlyTag`nStable VRCX release: $stableTag`nPatcher source commit: $sourceCommit`nPatcher release tag: $patcherTag" | Set-Content -LiteralPath release-notes.md -Encoding utf8
 
       - name: Skip unchanged release
         if: steps.meta.outputs.should_publish != 'true'
         shell: pwsh
-        run: Write-Host 'The latest VRCX release and patcher source are already published.'
+        run: Write-Host 'Both VRCX releases and the patcher source are already published.'
 
-      - name: Check out selected VRCX release source
+      - name: Check out selected nightly source
         if: steps.meta.outputs.should_publish == 'true'
         uses: actions/checkout@v4
         with:
           repository: Natsumi-sama/VRCX
-          ref: ${{ steps.meta.outputs.vrcx_tag }}
-          path: VRCX-source
+          ref: ${{ steps.meta.outputs.nightly_tag }}
+          path: VRCX-nightly-source
 
-      - name: Apply the FewTags integration
+      - name: Check out selected stable source
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: vrcx-team/VRCX
+          ref: ${{ steps.meta.outputs.stable_tag }}
+          path: VRCX-stable-source
+
+      - name: Apply integration to both VRCX sources
         if: steps.meta.outputs.should_publish == 'true'
         shell: pwsh
         run: |
-          Push-Location VRCX-source
-          try {
-            git apply --check ..\integration\fewtags-vrcx.patch
-            git apply ..\integration\fewtags-vrcx.patch
-          } finally { Pop-Location }
+          foreach ($source in @('VRCX-nightly-source', 'VRCX-stable-source')) {
+            Push-Location $source
+            try {
+              git apply --check ..\integration\fewtags-vrcx.patch
+              if ($LASTEXITCODE -ne 0) { throw "FewTags integration does not apply to $source." }
+              git apply ..\integration\fewtags-vrcx.patch
+              if ($LASTEXITCODE -ne 0) { throw "FewTags integration failed on $source." }
+            } finally { Pop-Location }
+          }
 
       - name: Set up Node.js
         if: steps.meta.outputs.should_publish == 'true'
@@ -95,15 +117,45 @@ jobs:
         with:
           node-version: 24.x
 
-      - name: Build VRCX frontend
+      - name: Build and package both VRCX frontends
         if: steps.meta.outputs.should_publish == 'true'
         shell: pwsh
-        working-directory: VRCX-source
         run: |
-          npm ci
-          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
-          npm run prod
-          if ($LASTEXITCODE -ne 0) { throw 'VRCX frontend build failed.' }
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path payload\nightly, payload\stable, release-dist | Out-Null
+          foreach ($variant in @(@{ name = 'nightly'; source = 'VRCX-nightly-source' }, @{ name = 'stable'; source = 'VRCX-stable-source' })) {
+            Push-Location $variant.source
+            try {
+              npm ci
+              if ($LASTEXITCODE -ne 0) { throw "npm ci failed for $($variant.name)." }
+              npm run prod
+              if ($LASTEXITCODE -ne 0) { throw "VRCX frontend build failed for $($variant.name)." }
+              Compress-Archive -Path build\html -DestinationPath "$env:GITHUB_WORKSPACE\payload\$($variant.name)\VRCX-html.zip" -Force
+            } finally { Pop-Location }
+          }
+
+      - name: Identify exact VRCX native builds
+        id: native
+        if: steps.meta.outputs.should_publish == 'true'
+        shell: pwsh
+        env:
+          NIGHTLY_ZIP_URL: ${{ steps.meta.outputs.nightly_zip_url }}
+          STABLE_ZIP_URL: ${{ steps.meta.outputs.stable_zip_url }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($variant in @(@{ name = 'nightly'; url = $env:NIGHTLY_ZIP_URL }, @{ name = 'stable'; url = $env:STABLE_ZIP_URL })) {
+            $zip = Join-Path $env:GITHUB_WORKSPACE "release-dist\$($variant.name).zip"
+            $root = Join-Path $env:RUNNER_TEMP "vrcx-$($variant.name)-dist"
+            Invoke-WebRequest -Uri $variant.url -OutFile $zip -Headers @{ 'User-Agent' = 'VRCX-FewTags-Patcher-CI' }
+            Expand-Archive -LiteralPath $zip -DestinationPath $root -Force
+            $exe = @(Get-ChildItem -LiteralPath $root -Filter VRCX.exe -File -Recurse)
+            $dll = @(Get-ChildItem -LiteralPath $root -Filter VRCX.dll -File -Recurse)
+            if ($exe.Count -ne 1 -or $dll.Count -ne 1) { throw "Could not uniquely identify VRCX.exe and VRCX.dll in the $($variant.name) release ZIP." }
+            $exeHash = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $dllHash = (Get-FileHash -LiteralPath $dll[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$($variant.name)_exe_sha256=$exeHash" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+            "$($variant.name)_dll_sha256=$dllHash" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          }
 
       - name: Set up .NET SDK
         if: steps.meta.outputs.should_publish == 'true'
@@ -111,22 +163,27 @@ jobs:
         with:
           dotnet-version: 7.0.x
 
-      - name: Package frontend and publish single-file patcher
+      - name: Publish single-file patcher and checksum
         if: steps.meta.outputs.should_publish == 'true'
         shell: pwsh
         env:
-          VRCX_TAG: ${{ steps.meta.outputs.vrcx_tag }}
+          NIGHTLY_TAG: ${{ steps.meta.outputs.nightly_tag }}
+          STABLE_TAG: ${{ steps.meta.outputs.stable_tag }}
           PATCHER_TAG: ${{ steps.meta.outputs.patcher_tag }}
+          NIGHTLY_EXE_SHA256: ${{ steps.native.outputs.nightly_exe_sha256 }}
+          NIGHTLY_DLL_SHA256: ${{ steps.native.outputs.nightly_dll_sha256 }}
+          STABLE_EXE_SHA256: ${{ steps.native.outputs.stable_exe_sha256 }}
+          STABLE_DLL_SHA256: ${{ steps.native.outputs.stable_dll_sha256 }}
         run: |
-          $packageVersion = (Get-Content VRCX-source\package.json -Raw | ConvertFrom-Json).version
-          New-Item -ItemType Directory -Force -Path payload | Out-Null
-          Compress-Archive -Path VRCX-source\build\html -DestinationPath payload\VRCX-html.zip -Force
+          $nightlyVersion = (Get-Content VRCX-nightly-source\package.json -Raw | ConvertFrom-Json).version
+          $stableVersion = (Get-Content VRCX-stable-source\package.json -Raw | ConvertFrom-Json).version
           dotnet publish app\VRCXFewTagsPatcher.csproj -c Release -r win-x64 --self-contained true -o app\publish `
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:VrcxReleaseTag=$env:VRCX_TAG `
-            -p:VrcxPackageVersion=$packageVersion `
-            -p:PatcherVersion=$env:PATCHER_TAG `
-            -p:PatcherRepository=$env:GITHUB_REPOSITORY
+            -p:VrcxNightlyReleaseTag=$env:NIGHTLY_TAG -p:VrcxStableReleaseTag=$env:STABLE_TAG `
+            -p:VrcxNightlyPackageVersion=$nightlyVersion -p:VrcxStablePackageVersion=$stableVersion `
+            -p:VrcxNightlyExeSha256=$env:NIGHTLY_EXE_SHA256 -p:VrcxNightlyDllSha256=$env:NIGHTLY_DLL_SHA256 `
+            -p:VrcxStableExeSha256=$env:STABLE_EXE_SHA256 -p:VrcxStableDllSha256=$env:STABLE_DLL_SHA256 `
+            -p:PatcherVersion=$env:PATCHER_TAG -p:PatcherRepository=$env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw 'Patcher publish failed.' }
           $exe = 'app\publish\VRCX-FewTags-Patcher.exe'
           if (-not (Test-Path $exe)) { throw 'The patcher EXE was not produced.' }
@@ -160,12 +217,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PATCHER_TAG: ${{ needs.build.outputs.patcher_tag }}
-          VRCX_TAG: ${{ needs.build.outputs.vrcx_tag }}
+          NIGHTLY_TAG: ${{ needs.build.outputs.nightly_tag }}
+          STABLE_TAG: ${{ needs.build.outputs.stable_tag }}
         run: |
           gh release create $env:PATCHER_TAG `
             release-assets\VRCX-FewTags-Patcher.exe `
             release-assets\VRCX-FewTags-Patcher.exe.sha256 `
             --repo $env:GITHUB_REPOSITORY `
-            --title "FewTags for VRCX ($env:VRCX_TAG)" `
+            --title "FewTags for VRCX (Nightly $env:NIGHTLY_TAG + Stable $env:STABLE_TAG)" `
             --notes-file release-assets\release-notes.md `
             --latest
