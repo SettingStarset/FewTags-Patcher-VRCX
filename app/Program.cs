@@ -59,8 +59,8 @@ internal sealed class PatcherForm : Form
     public PatcherForm()
     {
         Text = "VRCX FewTags Patcher";
-        ClientSize = new Size(760, 470);
-        MinimumSize = new Size(660, 440);
+        ClientSize = new Size(760, 520);
+        MinimumSize = new Size(660, 500);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = true;
@@ -88,7 +88,7 @@ internal sealed class PatcherForm : Form
         var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(0, 8, 0, 8), BackColor = Canvas };
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
         content.RowStyles.Add(new RowStyle(SizeType.Absolute, 47));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 112));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var pathLabel = new Label { Text = "VRCX INSTALL FOLDER", AutoSize = true, Dock = DockStyle.Fill, ForeColor = Muted, Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
         var pathRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas };
@@ -160,7 +160,7 @@ internal sealed class PatcherForm : Form
 
     private static Control CreateVersionCard(string channel, string repository, string releaseTag, Color accent)
     {
-        var card = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Margin = new Padding(0, 0, 10, 0), Padding = new Padding(12, 8, 8, 8) };
+        var card = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Margin = new Padding(0, 0, 10, 0), Padding = new Padding(12, 6, 8, 6), MinimumSize = new Size(0, 84) };
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = Surface };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 10));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
