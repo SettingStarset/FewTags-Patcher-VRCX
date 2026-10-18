@@ -41,55 +41,165 @@ internal sealed class PatcherForm : Form
             PatcherBuildInfo.VrcxStableExeSha256, PatcherBuildInfo.VrcxStableDllSha256, "VRCX-FewTags-html-stable.zip")
     };
 
-    private readonly TextBox _path = new() { Anchor = AnchorStyles.Left | AnchorStyles.Right };
-    private readonly Label _status = new() { AutoSize = false, Height = 58, TextAlign = ContentAlignment.MiddleLeft };
-    private readonly Button _apply = new() { Text = "Apply / Update", Width = 128, Height = 36 };
-    private readonly Button _restore = new() { Text = "Restore backup", Width = 128, Height = 36 };
-    private readonly Button _browse = new() { Text = "Browse…", Width = 96, Height = 28 };
+    private static readonly Color Ink = Color.FromArgb(29, 39, 55);
+    private static readonly Color Muted = Color.FromArgb(103, 116, 133);
+    private static readonly Color Accent = Color.FromArgb(78, 111, 230);
+    private static readonly Color Surface = Color.White;
+    private static readonly Color Canvas = Color.FromArgb(244, 247, 251);
+    private readonly TextBox _path = new() { Dock = DockStyle.Fill, BorderStyle = BorderStyle.FixedSingle, AccessibleName = "VRCX install folder" };
+    private readonly Label _status = new() { Dock = DockStyle.Fill, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Ink };
+    private readonly Label _compatibility = new() { Dock = DockStyle.Fill, AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted };
+    private readonly ProgressBar _progress = new() { Dock = DockStyle.Bottom, Height = 4, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 24, Visible = false };
+    private readonly Button _apply = new() { Text = "Apply / Update", AutoSize = true, MinimumSize = new Size(150, 40), FlatStyle = FlatStyle.Flat, BackColor = Accent, ForeColor = Color.White, UseVisualStyleBackColor = false, AccessibleName = "Apply or update FewTags" };
+    private readonly Button _restore = new() { Text = "Restore backup", AutoSize = true, MinimumSize = new Size(140, 40), FlatStyle = FlatStyle.Flat, BackColor = Surface, ForeColor = Ink, AccessibleName = "Restore the latest VRCX backup" };
+    private readonly Button _browse = new() { Text = "Browse…", AutoSize = true, MinimumSize = new Size(98, 34), FlatStyle = FlatStyle.Flat, BackColor = Surface, ForeColor = Ink };
+    private readonly ToolTip _toolTip = new() { AutoPopDelay = 12000, InitialDelay = 500, ReshowDelay = 100 };
+    private readonly System.Windows.Forms.Timer _pathCheckTimer = new() { Interval = 450 };
 
     public PatcherForm()
     {
         Text = "VRCX FewTags Patcher";
-        ClientSize = new Size(650, 250);
-        MinimumSize = new Size(570, 250);
+        ClientSize = new Size(760, 470);
+        MinimumSize = new Size(660, 440);
         StartPosition = FormStartPosition.CenterScreen;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        BackColor = Canvas;
+        Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AcceptButton = _apply;
+        CancelButton = _restore;
 
-        var title = new Label
-        {
-            Text = "FewTags for VRCX",
-            AutoSize = true,
-            Font = new Font(Font.FontFamily, 13f, FontStyle.Bold),
-            Left = 18,
-            Top = 16
-        };
-        var subtitle = new Label
-        {
-            Text = $"Nightly {PatcherBuildInfo.VrcxNightlyReleaseTag} + Stable {PatcherBuildInfo.VrcxStableReleaseTag} · patcher {PatcherBuildInfo.PatcherVersion}",
-            AutoSize = true,
-            Left = 19,
-            Top = 47
-        };
-        var pathLabel = new Label { Text = "VRCX install folder", AutoSize = true, Left = 19, Top = 83 };
-        _path.SetBounds(19, 105, 500, 27);
-        _path.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        _browse.SetBounds(529, 104, 101, 29);
-        _browse.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(22), BackColor = Canvas };
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 105));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
+
+        var hero = new Panel { Dock = DockStyle.Fill, BackColor = Ink, Padding = new Padding(22, 13, 22, 12) };
+        var heroLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Ink };
+        heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
+        heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
+        var title = new Label { Text = "FewTags for VRCX", Dock = DockStyle.Fill, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 20f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
+        var subtitle = new Label { Text = $"Patch your existing VRCX install · Patcher {PatcherBuildInfo.PatcherVersion}", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(206, 216, 232), Font = new Font("Segoe UI", 9.5f), TextAlign = ContentAlignment.MiddleLeft };
+        heroLayout.Controls.Add(title, 0, 0);
+        heroLayout.Controls.Add(subtitle, 0, 1);
+        hero.Controls.Add(heroLayout);
+
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(0, 17, 0, 12), BackColor = Canvas };
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+        content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var pathLabel = new Label { Text = "VRCX INSTALL FOLDER", AutoSize = true, Dock = DockStyle.Fill, ForeColor = Muted, Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+        var pathRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas };
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
         _browse.Click += (_, _) => BrowseForInstall();
-        _status.SetBounds(19, 145, 611, 54);
-        _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-        _apply.SetBounds(355, 199, 131, 36);
-        _apply.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-        _restore.SetBounds(499, 199, 131, 36);
-        _restore.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+        _browse.Margin = new Padding(10, 2, 0, 2);
+        pathRow.Controls.Add(_path, 0, 0);
+        pathRow.Controls.Add(_browse, 1, 0);
+
+        var versions = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas, Padding = new Padding(0, 12, 0, 8) };
+        versions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        versions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        versions.Controls.Add(CreateVersionCard("STABLE", "vrcx-team/VRCX", PatcherBuildInfo.VrcxStableReleaseTag, Color.FromArgb(39, 153, 119)), 0, 0);
+        versions.Controls.Add(CreateVersionCard("NIGHTLY", "Natsumi-sama/VRCX", PatcherBuildInfo.VrcxNightlyReleaseTag, Accent), 1, 0);
+
+        var statusCard = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(14, 8, 14, 8) };
+        _status.Text = "Choose your VRCX folder, then apply the FewTags integration.";
+        _compatibility.Text = "Only the exact supported stable and nightly builds will be changed.";
+        var statusLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Surface };
+        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
+        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
+        statusLayout.Controls.Add(_status, 0, 0);
+        statusLayout.Controls.Add(_compatibility, 0, 1);
+        statusCard.Controls.Add(statusLayout);
+        statusCard.Controls.Add(_progress);
+
+        content.Controls.Add(pathLabel, 0, 0);
+        content.Controls.Add(pathRow, 0, 1);
+        content.Controls.Add(versions, 0, 2);
+        content.Controls.Add(statusCard, 0, 3);
+
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, BackColor = Canvas, Padding = new Padding(0, 10, 0, 0) };
         _apply.Click += async (_, _) => await ApplyAsync();
         _restore.Click += (_, _) => RestoreLatestBackup();
-        Controls.AddRange(new Control[] { title, subtitle, pathLabel, _path, _browse, _status, _apply, _restore });
+        _apply.FlatAppearance.BorderSize = 0;
+        _apply.FlatAppearance.MouseOverBackColor = Color.FromArgb(62, 94, 208);
+        _restore.FlatAppearance.BorderColor = Color.FromArgb(218, 225, 235);
+        _toolTip.SetToolTip(_path, "Select the folder containing VRCX.exe and the html folder.");
+        _toolTip.SetToolTip(_restore, "Restore the most recent frontend backup from this install folder.");
+        actions.Controls.Add(_restore);
+        actions.Controls.Add(_apply);
+
+        shell.Controls.Add(hero, 0, 0);
+        shell.Controls.Add(content, 0, 1);
+        shell.Controls.Add(actions, 0, 2);
+        Controls.Add(shell);
 
         _path.Text = FindInstall() ?? @"C:\Program Files\VRCX";
-        _status.Text = "Choose your VRCX install folder, then select Apply / Update.";
+        _pathCheckTimer.Tick += (_, _) =>
+        {
+            _pathCheckTimer.Stop();
+            RefreshCompatibility();
+        };
+        _path.TextChanged += (_, _) =>
+        {
+            _pathCheckTimer.Stop();
+            _pathCheckTimer.Start();
+        };
+        _path.Validated += (_, _) => RefreshCompatibility();
+        _path.AccessibleDescription = "Folder containing VRCX.exe, VRCX.dll, and the html subfolder.";
+        _apply.TabIndex = 3;
+        _restore.TabIndex = 4;
+        _browse.TabIndex = 2;
+        _path.TabIndex = 1;
+        RefreshCompatibility();
         Shown += async (_, _) => await CheckForPatcherUpdateAsync();
+    }
+
+    private static Control CreateVersionCard(string channel, string repository, string releaseTag, Color accent)
+    {
+        var card = new Panel { Dock = DockStyle.Fill, BackColor = Surface, Margin = new Padding(0, 0, 10, 0), Padding = new Padding(12, 8, 8, 8) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = Surface };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 10));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 47));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 53));
+        var stripe = new Panel { Dock = DockStyle.Fill, BackColor = accent, Margin = new Padding(0, 1, 0, 1) };
+        var name = new Label { Text = $"{channel}  ·  {repository}", Dock = DockStyle.Fill, ForeColor = Muted, Font = new Font("Segoe UI Semibold", 8.5f, FontStyle.Bold), AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(8, 0, 0, 0) };
+        var version = new Label { Text = releaseTag, Dock = DockStyle.Fill, ForeColor = Ink, Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold), AutoEllipsis = true, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(8, 0, 0, 0) };
+        layout.Controls.Add(stripe, 0, 0);
+        layout.SetRowSpan(stripe, 2);
+        layout.Controls.Add(name, 1, 0);
+        layout.Controls.Add(version, 1, 1);
+        card.Controls.Add(layout);
+        return card;
+    }
+
+    private void RefreshCompatibility()
+    {
+        if (!IsHandleCreated) return;
+        try
+        {
+            var target = Path.GetFullPath(_path.Text.Trim().Trim('"'));
+            if (!File.Exists(Path.Combine(target, "VRCX.exe")) || !File.Exists(Path.Combine(target, "VRCX.dll")))
+            {
+                _compatibility.Text = "Select a folder containing VRCX.exe and VRCX.dll to check build compatibility.";
+                _compatibility.ForeColor = Muted;
+                return;
+            }
+            var exeHash = HashFile(Path.Combine(target, "VRCX.exe"));
+            var dllHash = HashFile(Path.Combine(target, "VRCX.dll"));
+            var match = PayloadVariants.FirstOrDefault(variant => string.Equals(variant.ExeSha256, exeHash, StringComparison.OrdinalIgnoreCase) && string.Equals(variant.DllSha256, dllHash, StringComparison.OrdinalIgnoreCase));
+            _compatibility.Text = match is null ? "Build not recognized · Apply will leave this VRCX installation unchanged." : $"{match.Channel} build recognized · {match.ReleaseTag}";
+            _compatibility.ForeColor = match is null ? Color.FromArgb(180, 74, 70) : Color.FromArgb(39, 137, 105);
+        }
+        catch
+        {
+            _compatibility.Text = "Select a valid VRCX install folder to check compatibility.";
+            _compatibility.ForeColor = Muted;
+        }
     }
 
     private static HttpClient CreateHttpClient()
@@ -120,7 +230,10 @@ internal sealed class PatcherForm : Form
         try
         {
             _status.Text = "Matching the installed VRCX executable to a compatible frontend…";
+            _compatibility.Text = "Checking exact VRCX build fingerprints…";
             var variant = ResolveCompatiblePayload(target);
+            _compatibility.Text = $"{variant.Channel} build recognized · {variant.ReleaseTag}";
+            _compatibility.ForeColor = Color.FromArgb(39, 137, 105);
 
             _status.Text = "Downloading and validating the latest FewTags databases…";
             var v2Bytes = await DownloadDatabaseAsync("FewTagsv2.json");
@@ -151,6 +264,7 @@ internal sealed class PatcherForm : Form
             if (changedFiles.Count == 0)
             {
                 _status.Text = "VRCX already has the current FewTags integration.";
+                _compatibility.Text = $"{variant.Channel} build · no frontend changes needed.";
                 return;
             }
 
@@ -186,13 +300,14 @@ internal sealed class PatcherForm : Form
             }
 
             _status.Text = $"FewTags applied to the {variant.Channel} build. Updated {changedFiles.Count} files; backup saved to {Path.GetFileName(backupPath)}.";
-            MessageBox.Show(this,
-                $"FewTags was applied to the selected VRCX {variant.Channel} build ({variant.ReleaseTag}).\n\nUpdated files: {changedFiles.Count}\nBackup: {backupPath}\n\nRelaunch VRCX to see the tags.",
-                "VRCX updated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            _compatibility.Text = $"{variant.Channel} build patched · {variant.ReleaseTag} · restart VRCX to see your tags.";
+            _toolTip.SetToolTip(_status, $"Backup saved to {backupPath}");
         }
         catch (Exception ex)
         {
             _status.Text = "The patch could not be completed.";
+            _compatibility.Text = ex.Message;
+            _compatibility.ForeColor = Color.FromArgb(180, 74, 70);
             MessageBox.Show(this, ex.Message, "Patch failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -237,7 +352,9 @@ internal sealed class PatcherForm : Form
             else
                 RestoreWholeHtmlBackup(backup, target);
             _status.Text = $"Restored {Path.GetFileName(backup)}. Relaunch VRCX.";
-            MessageBox.Show(this, $"Restored the frontend from:\n{backup}", "Restore complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            _compatibility.Text = $"Restored frontend backup · {Path.GetFileName(backup)}";
+            _compatibility.ForeColor = Color.FromArgb(39, 137, 105);
+            _toolTip.SetToolTip(_status, backup);
         }
         catch (Exception ex)
         {
@@ -537,6 +654,8 @@ internal sealed class PatcherForm : Form
         _restore.Enabled = !busy;
         _browse.Enabled = !busy;
         _path.Enabled = !busy;
+        _progress.Visible = busy;
+        UseWaitCursor = busy;
     }
 
     private sealed record PayloadVariant(string Channel, string ReleaseTag, string PackageVersion, string ExeSha256, string DllSha256, string ResourceName);
