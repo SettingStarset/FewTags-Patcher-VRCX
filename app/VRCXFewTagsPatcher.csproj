@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>VRCX-FewTags-Patcher</AssemblyName>
+    <RootNamespace>VRCXFewTagsPatcher</RootNamespace>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <VrcxReleaseTag Condition="'$(VrcxReleaseTag)' == ''">2026-10-18T13.40-d8619fb</VrcxReleaseTag>
+    <VrcxPackageVersion Condition="'$(VrcxPackageVersion)' == ''">2026.09.16</VrcxPackageVersion>
+    <PatcherVersion Condition="'$(PatcherVersion)' == ''">v0.1.0-local</PatcherVersion>
+    <PatcherRepository Condition="'$(PatcherRepository)' == ''">unset</PatcherRepository>
+    <VrcxPayloadArchive Condition="'$(VrcxPayloadArchive)' == ''">$(MSBuildProjectDirectory)\..\payload\VRCX-html.zip</VrcxPayloadArchive>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(VrcxPayloadArchive)" LogicalName="VRCX-FewTags-html.zip" />
+  </ItemGroup>
+  <Target Name="GeneratePatcherBuildInfo" BeforeTargets="CoreCompile">
+    <WriteLinesToFile File="$(IntermediateOutputPath)PatcherBuildInfo.g.cs"
+      Lines="namespace VRCXFewTagsPatcher%3B internal static class PatcherBuildInfo { internal const string VrcxReleaseTag = %22$(VrcxReleaseTag)%22%3B internal const string VrcxPackageVersion = %22$(VrcxPackageVersion)%22%3B internal const string PatcherVersion = %22$(PatcherVersion)%22%3B internal const string PatcherRepository = %22$(PatcherRepository)%22%3B }"
+      Overwrite="true" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)PatcherBuildInfo.g.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,170 @@
+name: Build and release VRCX FewTags patcher
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - 'integration/**'
+      - '.github/workflows/release.yml'
+      - '.gitignore'
+      - 'README.md'
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild and release even if the VRCX source tag is unchanged
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: vrcx-fewtags-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+      patcher_tag: ${{ steps.meta.outputs.patcher_tag }}
+      vrcx_tag: ${{ steps.meta.outputs.vrcx_tag }}
+    steps:
+      - name: Check out patcher source
+        uses: actions/checkout@v4
+
+      - name: Select upstream and patcher versions
+        id: meta
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; 'User-Agent' = 'VRCX-FewTags-Patcher-CI'; Accept = 'application/vnd.github+json' }
+          $upstream = Invoke-RestMethod -Uri 'https://api.github.com/repos/Natsumi-sama/VRCX/releases/latest' -Headers $headers
+          $vrcxTag = [string]$upstream.tag_name
+          if ([string]::IsNullOrWhiteSpace($vrcxTag)) { throw 'GitHub returned no VRCX release tag.' }
+          $sourceCommit = (git rev-parse HEAD).Trim()
+          $patcherTag = "vrcx-fewtags-$vrcxTag-$($sourceCommit.Substring(0,8))"
+          $force = $env:FORCE_REBUILD -eq 'true'
+          $shouldPublish = $force
+          if (-not $force) {
+            try {
+              $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" -Headers $headers
+              $body = [string]$latest.body
+              $hasSameVrcx = $body.Contains("VRCX release: $vrcxTag")
+              $hasSameSource = $body.Contains("Patcher source commit: $sourceCommit")
+              $shouldPublish = -not ($hasSameVrcx -and $hasSameSource)
+            } catch { $shouldPublish = $true }
+          }
+          "vrcx_tag=$vrcxTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "patcher_tag=$patcherTag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "should_publish=$($shouldPublish.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "VRCX release: $vrcxTag`nPatcher source commit: $sourceCommit`nPatcher release tag: $patcherTag" | Set-Content -LiteralPath release-notes.md -Encoding utf8
+
+      - name: Skip unchanged release
+        if: steps.meta.outputs.should_publish != 'true'
+        shell: pwsh
+        run: Write-Host 'The latest VRCX release and patcher source are already published.'
+
+      - name: Check out selected VRCX release source
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: Natsumi-sama/VRCX
+          ref: ${{ steps.meta.outputs.vrcx_tag }}
+          path: VRCX-source
+
+      - name: Apply the FewTags integration
+        if: steps.meta.outputs.should_publish == 'true'
+        shell: pwsh
+        run: |
+          Push-Location VRCX-source
+          try {
+            git apply --check ..\integration\fewtags-vrcx.patch
+            git apply ..\integration\fewtags-vrcx.patch
+          } finally { Pop-Location }
+
+      - name: Set up Node.js
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+
+      - name: Build VRCX frontend
+        if: steps.meta.outputs.should_publish == 'true'
+        shell: pwsh
+        working-directory: VRCX-source
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+          npm run prod
+          if ($LASTEXITCODE -ne 0) { throw 'VRCX frontend build failed.' }
+
+      - name: Set up .NET SDK
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 7.0.x
+
+      - name: Package frontend and publish single-file patcher
+        if: steps.meta.outputs.should_publish == 'true'
+        shell: pwsh
+        env:
+          VRCX_TAG: ${{ steps.meta.outputs.vrcx_tag }}
+          PATCHER_TAG: ${{ steps.meta.outputs.patcher_tag }}
+        run: |
+          $packageVersion = (Get-Content VRCX-source\package.json -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path payload | Out-Null
+          Compress-Archive -Path VRCX-source\build\html -DestinationPath payload\VRCX-html.zip -Force
+          dotnet publish app\VRCXFewTagsPatcher.csproj -c Release -r win-x64 --self-contained true -o app\publish `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:VrcxReleaseTag=$env:VRCX_TAG `
+            -p:VrcxPackageVersion=$packageVersion `
+            -p:PatcherVersion=$env:PATCHER_TAG `
+            -p:PatcherRepository=$env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Patcher publish failed.' }
+          $exe = 'app\publish\VRCX-FewTags-Patcher.exe'
+          if (-not (Test-Path $exe)) { throw 'The patcher EXE was not produced.' }
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  VRCX-FewTags-Patcher.exe" | Set-Content -LiteralPath 'app\publish\VRCX-FewTags-Patcher.exe.sha256' -Encoding ascii
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item app\publish\VRCX-FewTags-Patcher.exe, app\publish\VRCX-FewTags-Patcher.exe.sha256, release-notes.md -Destination release-assets
+
+      - name: Upload release files
+        if: steps.meta.outputs.should_publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrcx-fewtags-release
+          path: release-assets/*
+
+  publish:
+    if: needs.build.outputs.should_publish == 'true'
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download completed release files
+        uses: actions/download-artifact@v4
+        with:
+          name: vrcx-fewtags-release
+          path: release-assets
+
+      - name: Publish latest patcher release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATCHER_TAG: ${{ needs.build.outputs.patcher_tag }}
+          VRCX_TAG: ${{ needs.build.outputs.vrcx_tag }}
+        run: |
+          gh release create $env:PATCHER_TAG `
+            release-assets\VRCX-FewTags-Patcher.exe `
+            release-assets\VRCX-FewTags-Patcher.exe.sha256 `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "FewTags for VRCX ($env:VRCX_TAG)" `
+            --notes-file release-assets\release-notes.md `
+            --latest
