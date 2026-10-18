@@ -80,15 +80,15 @@ internal sealed class PatcherForm : Form
         heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
         heroLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
         var title = new Label { Text = "FewTags for VRCX", Dock = DockStyle.Fill, ForeColor = Color.White, Font = new Font("Segoe UI Semibold", 20f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
-        var subtitle = new Label { Text = $"Patch your existing VRCX install · Patcher {PatcherBuildInfo.PatcherVersion}", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(206, 216, 232), Font = new Font("Segoe UI", 9.5f), TextAlign = ContentAlignment.MiddleLeft };
+        var subtitle = new Label { Text = "Patch your existing VRCX install · Supports stable and nightly builds", Dock = DockStyle.Fill, ForeColor = Color.FromArgb(206, 216, 232), Font = new Font("Segoe UI", 9.5f), TextAlign = ContentAlignment.MiddleLeft, AutoEllipsis = true };
         heroLayout.Controls.Add(title, 0, 0);
         heroLayout.Controls.Add(subtitle, 0, 1);
         hero.Controls.Add(heroLayout);
 
-        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(0, 17, 0, 12), BackColor = Canvas };
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+        var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(0, 8, 0, 8), BackColor = Canvas };
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 27));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 47));
+        content.RowStyles.Add(new RowStyle(SizeType.Absolute, 90));
         content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         var pathLabel = new Label { Text = "VRCX INSTALL FOLDER", AutoSize = true, Dock = DockStyle.Fill, ForeColor = Muted, Font = new Font("Segoe UI Semibold", 9f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
         var pathRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, BackColor = Canvas };
@@ -109,8 +109,8 @@ internal sealed class PatcherForm : Form
         _status.Text = "Choose your VRCX folder, then apply the FewTags integration.";
         _compatibility.Text = "Only the exact supported stable and nightly builds will be changed.";
         var statusLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = Surface };
-        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 60));
-        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 40));
+        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        statusLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         statusLayout.Controls.Add(_status, 0, 0);
         statusLayout.Controls.Add(_compatibility, 0, 1);
         statusCard.Controls.Add(statusLayout);
