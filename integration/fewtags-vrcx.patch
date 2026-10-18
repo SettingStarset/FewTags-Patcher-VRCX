@@ -1,0 +1,240 @@
+diff --git a/src/components/dialogs/UserDialog/FewTagsBadges.vue b/src/components/dialogs/UserDialog/FewTagsBadges.vue
+new file mode 100644
+index 0000000..0c1c410
+--- /dev/null
++++ b/src/components/dialogs/UserDialog/FewTagsBadges.vue
+@@ -0,0 +1,200 @@
++<template>
++    <div v-if="labels.length" class="fewtags-row" aria-label="FewTags">
++        <span
++            v-for="(label, index) in labels"
++            :key="`${index}-${label}`"
++            class="fewtags-chip"
++            :class="animationClass(label)"
++            :title="plainText(label)"
++            v-html="renderTag(label)"></span>
++    </div>
++</template>
++
++<script setup>
++    import { computed } from 'vue';
++
++    const props = defineProps({ userId: { type: String, default: '' } });
++    const animationPrefix = /^\.(LBL|CYLN|RAIN|SR|PULSE|JUMP|SHAKE|GT|BLINK|GLITCH|SCROLL)\./i;
++    const fewTagsData = window.__VRCX_FEWTAGS__ ?? { v2: { records: [] }, legacy: { records: [] } };
++
++    function plainText(value) {
++        return String(value ?? '')
++            .replace(/^\.[A-Za-z]+\./, '')
++            .replace(/<br\s*\/?\s*>/gi, ' ')
++            .replace(/<[^>]*>/g, '')
++            .replace(/&nbsp;/gi, ' ')
++            .replace(/&amp;/gi, '&')
++            .replace(/&lt;/gi, '<')
++            .replace(/&gt;/gi, '>')
++            .replace(/&quot;/gi, '"')
++            .replace(/&#39;/gi, "'")
++            .replace(/\s+/g, ' ')
++            .trim();
++    }
++
++    function addActiveField(labels, record, textField, activeField) {
++        if (record[activeField] !== true) return;
++        const text = String(record[textField] ?? '').trim();
++        if (text) labels.push(text);
++    }
++
++    function parseV2Record(record) {
++        const labels = [];
++        addActiveField(labels, record, 'PlateText', 'TextActive');
++        addActiveField(labels, record, 'PlateText2', 'Text2Active');
++        addActiveField(labels, record, 'PlateText3', 'Text3Active');
++        addActiveField(labels, record, 'PlateBigText', 'BigTextActive');
++        return labels;
++    }
++
++    function parseLegacyRecord(record) {
++        const labels = [];
++        if (record.TextActive === true && Array.isArray(record.Tag)) {
++            for (const tag of record.Tag) {
++                const text = String(tag ?? '').trim();
++                if (text) labels.push(text);
++            }
++        }
++        addActiveField(labels, record, 'PlateBigText', 'BigTextActive');
++        return labels;
++    }
++
++    const records = new Map();
++    const v2UserIds = new Set();
++    for (const record of fewTagsData.v2?.records ?? []) {
++        const userId = String(record.UserID ?? '');
++        if (!userId) continue;
++        v2UserIds.add(userId);
++        if (record.Active !== true) continue;
++        const labels = parseV2Record(record);
++        if (labels.length) records.set(userId, labels);
++    }
++    // V2 entries take precedence even when inactive, matching the reference patcher's removal behavior.
++    for (const record of fewTagsData.legacy?.records ?? []) {
++        const userId = String(record.UserID ?? '');
++        if (!userId || v2UserIds.has(userId) || record.Active !== true) continue;
++        const labels = parseLegacyRecord(record);
++        if (labels.length) records.set(userId, labels);
++    }
++
++    function escapeHtml(value) {
++        return String(value ?? '').replace(/[&<>"']/g, (character) => ({
++            '&': '&amp;',
++            '<': '&lt;',
++            '>': '&gt;',
++            '"': '&quot;',
++            "'": '&#39;'
++        })[character]);
++    }
++
++    function richTextHtml(value) {
++        const source = String(value ?? '');
++        const tokenRe = /<color=#[0-9a-f]{3,8}>|<\/color>|<b>|<\/b>|<i>|<\/i>|<size=\d+>|<\/size>|<br\s*\/?\s*>/gi;
++        const stack = [];
++        let html = '';
++        let last = 0;
++        let match;
++        while ((match = tokenRe.exec(source)) !== null) {
++            html += escapeHtml(source.slice(last, match.index));
++            const token = match[0];
++            const lower = token.toLowerCase();
++            if (lower.startsWith('<color=')) {
++                const color = lower.match(/^<color=(#[0-9a-f]{3,8})>$/)?.[1];
++                if (color) { html += `<span style="color:${color}">`; stack.push(['color', '</span>']); }
++            } else if (lower === '<b>') {
++                html += '<strong>'; stack.push(['b', '</strong>']);
++            } else if (lower === '<i>') {
++                html += '<em>'; stack.push(['i', '</em>']);
++            } else if (lower.startsWith('<size=')) {
++                const size = Number(lower.match(/^<size=(\d+)>$/)?.[1]);
++                if (Number.isFinite(size)) {
++                    const px = Math.max(8, Math.min(size, 24));
++                    html += `<span style="font-size:${px}px">`; stack.push(['size', '</span>']);
++                }
++            } else if (lower.startsWith('<br')) {
++                html += '<br>';
++            } else {
++                const closeType = lower === '</color>' ? 'color' : lower === '</b>' ? 'b' : lower === '</i>' ? 'i' : 'size';
++                if (stack.length && stack[stack.length - 1][0] === closeType) html += stack.pop()[1];
++            }
++            last = tokenRe.lastIndex;
++        }
++        html += escapeHtml(source.slice(last));
++        while (stack.length) html += stack.pop()[1];
++        return html;
++    }
++
++    function lettersHtml(html) {
++        const template = document.createElement('template');
++        template.innerHTML = html;
++        const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
++        const textNodes = [];
++        while (walker.nextNode()) textNodes.push(walker.currentNode);
++        let index = 0;
++        for (const node of textNodes) {
++            if (!node.nodeValue) continue;
++            const fragment = document.createDocumentFragment();
++            for (const character of Array.from(node.nodeValue)) {
++                const letter = document.createElement('span');
++                letter.className = 'fewtags-letter';
++                letter.style.setProperty('--fewtags-delay', `${index * -0.055}s`);
++                letter.textContent = character;
++                fragment.appendChild(letter);
++                index++;
++            }
++            node.parentNode.replaceChild(fragment, node);
++        }
++        return template.innerHTML;
++    }
++
++    function animationClass(value) {
++        const name = String(value ?? '').match(animationPrefix)?.[1]?.toLowerCase();
++        return name ? `fewtags-is-${name}` : '';
++    }
++
++    function renderTag(value) {
++        const source = String(value ?? '');
++        const prefix = source.match(animationPrefix);
++        if (!prefix) return richTextHtml(source);
++        const animation = prefix[1].toLowerCase();
++        let content = richTextHtml(source.slice(prefix[0].length));
++        if (['lbl', 'rain', 'sr', 'pulse', 'jump', 'shake', 'gt'].includes(animation)) content = lettersHtml(content);
++        if (animation === 'scroll') content = `<span class="fewtags-scroll-track"><span>${content}</span><span aria-hidden="true">${content}</span></span>`;
++        return `<span class="fewtags-animated fewtags-anim-${animation}">${content}</span>`;
++    }
++
++    const labels = computed(() => records.get(props.userId) ?? []);
++</script>
++
++<style scoped>
++    .fewtags-row { display: flex; flex-wrap: wrap; gap: 5px; }
++    .fewtags-chip { display: inline-flex; align-items: center; min-height: 22px; max-width: 100%; padding: 2px 9px; border: 1px solid color-mix(in oklab, var(--foreground) 22%, transparent); border-radius: 999px; background: color-mix(in oklab, var(--background) 72%, transparent); color: var(--foreground); font-size: 12px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
++    .fewtags-chip :deep(.fewtags-animated) { display: inline-block; position: relative; }
++    .fewtags-chip :deep(.fewtags-letter) { display: inline-block; white-space: pre; }
++    .fewtags-is-lbl :deep(.fewtags-letter) { animation: fewtags-lbl 2.4s ease-in-out infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-rain :deep(.fewtags-letter) { animation: fewtags-rain 2.2s linear infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-sr :deep(.fewtags-letter) { animation: fewtags-sr 1.2s ease-in-out infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-pulse :deep(.fewtags-letter) { animation: fewtags-pulse 1.4s ease-in-out infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-jump :deep(.fewtags-letter) { animation: fewtags-jump 1s ease-in-out infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-shake :deep(.fewtags-letter) { animation: fewtags-shake .6s ease-in-out infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-gt :deep(.fewtags-letter) { animation: fewtags-gt 2s linear infinite; animation-delay: var(--fewtags-delay); }
++    .fewtags-is-blink :deep(.fewtags-animated) { animation: fewtags-blink 1.4s steps(2, start) infinite; }
++    .fewtags-is-glitch :deep(.fewtags-animated) { animation: fewtags-glitch 2s steps(2, end) infinite; }
++    .fewtags-is-scroll { display: inline-block; max-width: min(260px, 45vw); overflow: hidden; white-space: nowrap; }
++    .fewtags-is-scroll :deep(.fewtags-scroll-track) { display: flex; width: max-content; animation: fewtags-scroll 8s linear infinite; }
++    .fewtags-is-scroll :deep(.fewtags-scroll-track > span) { flex: 0 0 auto; padding-right: 2em; }
++    .fewtags-is-cyln { perspective: 180px; }
++    .fewtags-is-cyln :deep(.fewtags-animated) { animation: fewtags-cyln 3s ease-in-out infinite; }
++    @keyframes fewtags-lbl { 0%, 100% { opacity: .55; transform: translateY(1px); } 50% { opacity: 1; transform: translateY(-1px); } }
++    @keyframes fewtags-rain { 0% { color: #ff595e; } 33% { color: #8ac926; } 66% { color: #1982c4; } 100% { color: #ff595e; } }
++    @keyframes fewtags-sr { 0%, 100% { text-shadow: 0 0 0 transparent; } 50% { text-shadow: 0 0 7px currentColor; } }
++    @keyframes fewtags-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
++    @keyframes fewtags-jump { 0%, 65%, 100% { transform: translateY(0); } 35% { transform: translateY(-4px); } }
++    @keyframes fewtags-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px) rotate(-2deg); } 75% { transform: translateX(1px) rotate(2deg); } }
++    @keyframes fewtags-gt { 0%, 100% { filter: hue-rotate(0); } 50% { filter: hue-rotate(180deg); } }
++    @keyframes fewtags-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .25; } }
++    @keyframes fewtags-glitch { 0%, 92%, 100% { text-shadow: none; transform: none; } 94% { text-shadow: 1px 0 #35d9ff, -1px 0 #ff365c; transform: skewX(4deg); } }
++    @keyframes fewtags-scroll { to { transform: translateX(-50%); } }
++    @keyframes fewtags-cyln { 0%, 100% { transform: rotateY(-12deg); } 50% { transform: rotateY(12deg); } }
++    @media (prefers-reduced-motion: reduce) { .fewtags-chip :deep(*) { animation: none !important; } }
++</style>
+diff --git a/src/components/dialogs/UserDialog/UserSummaryHeader.vue b/src/components/dialogs/UserDialog/UserSummaryHeader.vue
+index d139c00..5f50c3b 100644
+--- a/src/components/dialogs/UserDialog/UserSummaryHeader.vue
++++ b/src/components/dialogs/UserDialog/UserSummaryHeader.vue
+@@ -283,6 +283,8 @@
+                 </Badge>
+             </div>
+ 
++            <FewTagsBadges :user-id="userDialog.ref.id" />
++
+             <div
+                 v-if="userDialog.publicProfileRef?.badges && userDialog.publicProfileRef?.badges.length"
+                 class="flex flex-wrap gap-1.5">
+@@ -525,6 +527,7 @@
+     import ProfileEffect from '../../ProfileEffect.vue';
+ 
+     import UserActionDropdown from './UserActionDropdown.vue';
++    import FewTagsBadges from './FewTagsBadges.vue';
+     import { showGroupDialog } from '@/coordinators/groupCoordinator';
+     import { getAvatarName } from '@/coordinators/avatarCoordinator';
+ 
+diff --git a/src/index.html b/src/index.html
+index 2765523..74c249c 100644
+--- a/src/index.html
++++ b/src/index.html
+@@ -6,6 +6,8 @@
+         <meta name="referrer" content="no-referrer" />
+         <meta http-equiv="Cache-Control" content="no-cache" />
+ 
++        <!-- FEWTAGS_DATA_PLACEHOLDER -->
++
+         <title>VRCX</title>
+ 
+         <link rel="preconnect" href="https://api.vrchat.cloud" />
