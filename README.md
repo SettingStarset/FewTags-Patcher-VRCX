@@ -1,48 +1,78 @@
 # FewTags for VRCX
 
-This Windows patcher overlays the FewTags-enabled frontend onto an existing VRCX installation. It is a standalone `.exe`, not a VRCX setup installer or a separate VRCX build. Choose the folder containing `VRCX.exe`; the default is `C:\Program Files\VRCX`.
+<p align="center">
+  <strong>A small Windows patcher that adds FewTags profile badges to your existing VRCX installation.</strong><br>
+  Stable and nightly support · Automatic FewTags data refresh · Backup and restore
+</p>
 
-## Patcher features
+<p align="center">
+  <a href="https://github.com/SettingStarset/FewTags-Patcher-VRCX/releases/latest">Download the latest patcher</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/SettingStarset/FewTags-Patcher-VRCX/actions/workflows/release.yml">Release builds</a>
+</p>
 
-- Browse to a VRCX install folder, apply/update the integration, or restore the newest backup.
-- Download and validate both `FewTagsv2.json` and legacy `FewTags.json` each time you apply. The databases are injected into the frontend index, avoiding runtime requests from VRCX's local `file://` page.
-- Show tags only when a profile's exact user ID matches an active record. A v2 record takes precedence over legacy, even if the v2 entry is inactive.
-- Render the supported FewTags rich text and animation prefixes, including `.RAIN.`, `.SCROLL.`, `.PULSE.`, and `.GLITCH.`.
-- Back up only the changed frontend files with a manifest, and roll back a partial update if copying fails.
-- Match the installed VRCX executable and library against the exact supported release fingerprints before changing files. The current release supports nightly `2026-10-18T13.40-d8619fb` and stable `v2026.09.16`; unknown builds are refused safely.
-- When this project is published to its own GitHub repository, check for patcher releases at startup, ask before updating, verify the EXE's SHA-256 checksum, then replace and restart the patcher.
+---
 
-VRCX is installed under Program Files on many PCs. Run the patcher as administrator if Windows denies access to that folder. Close VRCX before updating; the app will ask it to close and stop if it remains open.
+## What it does
 
-## Build the EXE locally
+The patcher updates the frontend files in the VRCX folder you select. It does not install VRCX, replace its executable, or create a separate VRCX build.
 
-Requirements: Windows, Node.js 24 or later, npm 11 or later, and the .NET 7 SDK.
+| Feature | Details |
+| --- | --- |
+| **Stable and nightly** | Includes a frontend for the latest release from [vrcx-team/VRCX](https://github.com/vrcx-team/VRCX) and [Natsumi-sama/VRCX](https://github.com/Natsumi-sama/VRCX). |
+| **Exact build matching** | Checks the installed `VRCX.exe` and `VRCX.dll` before patching. Unsupported builds are left unchanged. |
+| **Fresh FewTags data** | Downloads and validates the current FewTags databases each time you apply the integration. |
+| **Profile badges** | Shows tags only for matching user IDs, with the supported rich text and animation styles. |
+| **Backup and restore** | Saves changed frontend files before applying and can restore the most recent recognized backup. |
+| **Patcher updates** | Checks for a newer patcher at startup, asks before installing, and verifies its SHA-256 checksum. |
 
-1. Check out each supported VRCX source release into separate `VRCX-nightly-source` and `VRCX-stable-source` folders.
-2. Apply `integration/fewtags-vrcx.patch`, then run `npm ci` and `npm run prod` in each checkout.
-3. Create `payload/nightly/VRCX-html.zip` and `payload/stable/VRCX-html.zip` with each built `html` folder at the ZIP root.
-4. Publish the patcher:
+## Install or update
+
+1. Download **VRCX-FewTags-Patcher.exe** from the [latest release](https://github.com/SettingStarset/FewTags-Patcher-VRCX/releases/latest).
+2. Run the patcher. It will suggest your VRCX folder; use **Browse…** if needed.
+3. Confirm the app recognizes your stable or nightly build.
+4. Select **Apply / Update**. If VRCX is open, close it and apply again.
+5. Start VRCX again to see FewTags on matching profiles.
+
+The default install folder is `C:\Program Files\VRCX`. If Windows denies access, run the patcher as administrator. The patcher only supports the exact VRCX builds bundled into that release; update the patcher after VRCX updates.
+
+## Restore the original frontend
+
+Close VRCX, open the patcher, select the same install folder, then choose **Restore backup**. The restore option recognizes both current per-file backups and earlier full-frontend backups.
+
+## How releases stay current
+
+GitHub Actions checks both VRCX repositories every four hours and also runs when the patcher or integration source changes. It builds the FewTags frontend against each latest release, verifies both builds, then publishes a new patcher with the matching executable and library fingerprints. A failed or incompatible build is not released.
+
+Each patcher release includes the EXE and a `.sha256` checksum file. Patcher self-updates are opt-in: the app asks before downloading and replacing itself.
+
+## Build from source
+
+The release workflow is the recommended way to produce a patcher because it selects the upstream releases and computes their exact binary fingerprints for you. To build manually, use Windows with Node.js 24+, npm 11+, and the .NET 7 SDK:
+
+1. Check out the desired stable and nightly VRCX source tags into `VRCX-stable-source` and `VRCX-nightly-source`.
+2. In each source folder, apply `integration/fewtags-vrcx.patch`, run `npm ci`, then run `npm run prod`.
+3. Zip each generated `build/html` folder so `html` is at the root of the archive. Save them as `payload/stable/VRCX-html.zip` and `payload/nightly/VRCX-html.zip`.
+4. Publish the Windows executable with the matching release tags and SHA-256 hashes:
 
    ```powershell
+   $nightlyTag = "<nightly-release-tag>"
+   $stableTag = "<stable-release-tag>"
+   $nightlyExeSha256 = "<nightly-exe-sha256>"
+   $nightlyDllSha256 = "<nightly-dll-sha256>"
+   $stableExeSha256 = "<stable-exe-sha256>"
+   $stableDllSha256 = "<stable-dll-sha256>"
+
    dotnet publish app/VRCXFewTagsPatcher.csproj -c Release -r win-x64 --self-contained true `
      -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-     -p:VrcxNightlyReleaseTag=2026-10-18T13.40-d8619fb `
-     -p:VrcxStableReleaseTag=v2026.09.16 `
-     -p:VrcxNightlyExeSha256=... -p:VrcxNightlyDllSha256=... `
-     -p:VrcxStableExeSha256=... -p:VrcxStableDllSha256=... `
+     -p:VrcxNightlyReleaseTag=$nightlyTag -p:VrcxStableReleaseTag=$stableTag `
+     -p:VrcxNightlyExeSha256=$nightlyExeSha256 -p:VrcxNightlyDllSha256=$nightlyDllSha256 `
+     -p:VrcxStableExeSha256=$stableExeSha256 -p:VrcxStableDllSha256=$stableDllSha256 `
      -p:PatcherRepository=SettingStarset/FewTags-Patcher-VRCX -o app/publish
    ```
 
-The EXE is written to `app/publish/VRCX-FewTags-Patcher.exe`. For a local build before choosing a release repository, omit `-p:PatcherRepository=...`; self-updates stay disabled until it is set.
+The output is `app/publish/VRCX-FewTags-Patcher.exe`. Self-updates use this repository's GitHub releases.
 
-## Automatic releases
+## Data note
 
-The workflow in `.github/workflows/release.yml` checks every four hours for the latest nightly and stable releases and also runs when the patcher or integration changes. It verifies the integration patch applies cleanly to both sources, builds both frontends, embeds them in a single-file patcher EXE, writes a SHA-256 file, and publishes a GitHub release only after both builds succeed. The patcher matches the installed VRCX native binaries to the corresponding embedded frontend. Each generated patcher uses its own repository's releases for opt-in self-updates. `workflow_dispatch` can force a rebuild.
-
-The reference patcher builds and replaces a complete VRCNext installation. This VRCX patcher keeps the original approach of overlaying only the frontend files into the selected existing installation.
-
-## Restore
-
-Open the patcher, choose the same VRCX folder, and select **Restore backup**. It recognizes both the current per-file manifest backups and earlier full-frontend backups.
-
-FewTags is community-maintained data and may be inaccurate or opinion-based. The integration displays the source tags without verifying their claims.
+FewTags is community-maintained data and may be inaccurate or opinion-based. The integration displays the source tags without independently verifying their claims.
