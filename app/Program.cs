@@ -572,9 +572,13 @@ internal sealed class PatcherForm : Form
         }
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var response = await Http.GetAsync($"https://api.github.com/repos/{PatcherBuildInfo.PatcherRepository}/releases/latest", timeout.Token);
-            if (!response.IsSuccessStatusCode) return;
+            if (!response.IsSuccessStatusCode)
+            {
+                _status.Text = $"Patcher update check unavailable (GitHub HTTP {(int)response.StatusCode}); you can still apply the installed version.";
+                return;
+            }
             using var release = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(timeout.Token));
             var root = release.RootElement;
             var tag = root.GetProperty("tag_name").GetString();
@@ -616,7 +620,9 @@ internal sealed class PatcherForm : Form
         }
         catch (Exception ex)
         {
-            _status.Text = "Patcher update check failed; you can still apply the installed version.";
+            var detail = ex is TaskCanceledException ? "The request timed out." : ex.Message;
+            _status.Text = $"Patcher update check failed: {detail}";
+            _toolTip.SetToolTip(_status, ex.ToString());
             Debug.WriteLine(ex);
         }
     }
