@@ -178,7 +178,7 @@ jobs:
           $nightlyVersion = (Get-Content VRCX-nightly-source\package.json -Raw | ConvertFrom-Json).version
           $stableVersion = (Get-Content VRCX-stable-source\package.json -Raw | ConvertFrom-Json).version
           dotnet publish app\VRCXFewTagsPatcher.csproj -c Release -r win-x64 --self-contained true -o app\publish `
-            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
             -p:VrcxNightlyReleaseTag=$env:NIGHTLY_TAG -p:VrcxStableReleaseTag=$env:STABLE_TAG `
             -p:VrcxNightlyPackageVersion=$nightlyVersion -p:VrcxStablePackageVersion=$stableVersion `
             -p:VrcxNightlyExeSha256=$env:NIGHTLY_EXE_SHA256 -p:VrcxNightlyDllSha256=$env:NIGHTLY_DLL_SHA256 `
@@ -187,6 +187,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Patcher publish failed.' }
           $exe = 'app\publish\VRCX-FewTags-Patcher.exe'
           if (-not (Test-Path $exe)) { throw 'The patcher EXE was not produced.' }
+          $exeSize = (Get-Item -LiteralPath $exe).Length
+          if ($exeSize -gt 128MB) { throw "Compressed patcher EXE is $exeSize bytes, above the previous updater's 128 MB compatibility limit." }
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  VRCX-FewTags-Patcher.exe" | Set-Content -LiteralPath 'app\publish\VRCX-FewTags-Patcher.exe.sha256' -Encoding ascii
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null

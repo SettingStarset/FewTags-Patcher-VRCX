@@ -44,7 +44,7 @@ Close VRCX, open the patcher, select the same install folder, then choose **Rest
 
 GitHub Actions checks both VRCX repositories every four hours and also runs when the patcher or integration source changes. It builds the FewTags frontend against each latest release, verifies both builds, then publishes a new patcher with the matching executable and library fingerprints. A failed or incompatible build is not released.
 
-Each patcher release includes the EXE and a `.sha256` checksum file. Patcher self-updates are opt-in: the app asks before downloading and replacing itself.
+Each patcher release includes a compressed, self-contained EXE and a `.sha256` checksum file. Releases are checked against the previous updater's 128 MB download limit so existing installations can update themselves. Patcher self-updates are opt-in: the app asks before downloading and replacing itself.
 
 ## Build from source
 
@@ -64,7 +64,7 @@ The release workflow is the recommended way to produce a patcher because it sele
    $stableDllSha256 = "<stable-dll-sha256>"
 
    dotnet publish app/VRCXFewTagsPatcher.csproj -c Release -r win-x64 --self-contained true `
-     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
      -p:VrcxNightlyReleaseTag=$nightlyTag -p:VrcxStableReleaseTag=$stableTag `
      -p:VrcxNightlyExeSha256=$nightlyExeSha256 -p:VrcxNightlyDllSha256=$nightlyDllSha256 `
      -p:VrcxStableExeSha256=$stableExeSha256 -p:VrcxStableDllSha256=$stableDllSha256 `

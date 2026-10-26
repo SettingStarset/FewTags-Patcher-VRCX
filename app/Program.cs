@@ -31,7 +31,7 @@ internal sealed class PatcherForm : Form
     private const string FewTagsBaseUrl = "https://raw.githubusercontent.com/Fewdys/FewTags/main/";
     private const string DataMarker = "<!-- FEWTAGS_DATA_PLACEHOLDER -->";
     private const int MaxDatabaseBytes = 32 * 1024 * 1024;
-    private const int MaxUpdaterBytes = 128 * 1024 * 1024;
+    private const int MaxUpdaterBytes = 256 * 1024 * 1024;
     private static readonly HttpClient Http = CreateHttpClient();
     private static readonly PayloadVariant[] PayloadVariants =
     {
