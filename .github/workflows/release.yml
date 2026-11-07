@@ -10,7 +10,9 @@ on:
       - '.gitattributes'
       - 'README.md'
   schedule:
-    - cron: '17 */4 * * *'
+    # Upstream VRCX releases can land between checks; poll frequently while
+    # allowing the workflow to skip the expensive build when tags are unchanged.
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       force_rebuild:
