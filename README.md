@@ -23,7 +23,7 @@ The patcher updates the frontend files in the VRCX folder you select. It does no
 | **Exact build matching** | Checks the installed `VRCX.exe` and `VRCX.dll` before patching. Unsupported builds are left unchanged. |
 | **Fresh FewTags data** | Downloads and validates the current FewTags databases each time you apply the integration. |
 | **Profile badges** | Shows tags only for matching user IDs, with the supported rich text and animation styles. |
-| **Backup and restore** | Saves changed frontend files before applying and can restore the most recent recognized backup. |
+| **Backup and restore** | Saves changed frontend files before applying, and restores the original VRCX files even after you have applied several times. |
 | **Patcher updates** | Checks for a newer patcher at startup, asks before installing, and verifies its SHA-256 checksum. |
 
 ## Install or update
@@ -31,20 +31,28 @@ The patcher updates the frontend files in the VRCX folder you select. It does no
 1. Download **VRCX-FewTags-Patcher.exe** from the [latest release](https://github.com/SettingStarset/FewTags-Patcher-VRCX/releases/latest).
 2. Run the patcher. It will suggest your VRCX folder; use **Browse…** if needed.
 3. Confirm the app recognizes your stable or nightly build.
-4. Select **Apply / Update**. If VRCX is open, close it and apply again.
+4. Select **Apply / Update**. If VRCX is open, the patcher asks before closing it.
 5. Start VRCX again to see FewTags on matching profiles.
 
-The default install folder is `C:\Program Files\VRCX`. If Windows denies access, run the patcher as administrator. The patcher only supports the exact VRCX builds bundled into that release; update the patcher after VRCX updates.
+The default install folder is `C:\Program Files\VRCX`. The patcher asks for administrator permission when it starts, because it writes into that folder. To refresh the FewTags data later, open the patcher and select **Apply / Update** again.
+
+The patcher only supports the exact VRCX builds bundled into that release; update the patcher after VRCX updates.
 
 If VRCX has just updated, the matching patcher may not be published yet. When you apply to a build it doesn't recognize, the patcher checks GitHub. It then tells you whether a newer patcher is ready to install, whether VRCX has a release that hasn't been built yet (try again in a few hours), or whether your VRCX build is simply unsupported.
 
 ## Restore the original frontend
 
-Close VRCX, open the patcher, select the same install folder, then choose **Restore backup**. The restore option recognizes both current per-file backups and earlier full-frontend backups.
+Close VRCX, open the patcher, select the same install folder, then choose **Restore backup** and confirm.
+
+- If you applied FewTags several times to the same VRCX build, the patcher walks back through those backups to the original VRCX files.
+- If VRCX has updated since you last applied FewTags, the update already replaced the patched files, so there is nothing to restore. The patcher says so and changes nothing.
+- Backups made by older patcher versions, including full-frontend backups, can still be restored. For those, only the most recent backup is used.
 
 ## How releases stay current
 
-GitHub Actions checks both VRCX repositories on a 15-minute schedule and also runs when the patcher or integration source changes. GitHub runs scheduled workflows on a best-effort basis, so checks can be delayed by several hours. To publish a build for a new VRCX release right away, open **Actions → Build and release VRCX FewTags patcher → Run workflow**. It builds the FewTags frontend against each latest release, verifies both builds, then publishes a new patcher with the matching executable and library fingerprints. A failed or incompatible build is not released.
+GitHub Actions checks the latest release of both VRCX repositories on a 15-minute schedule. It also runs when the patcher or integration source changes on `main`; pushes to other branches do not publish releases. For each latest release it applies the FewTags integration, builds the frontend, and records the exact `VRCX.exe` and `VRCX.dll` fingerprints. It then publishes a new patcher. If the integration no longer applies or a build fails, nothing is released.
+
+GitHub runs scheduled workflows on a best-effort basis, so a check can be delayed by several hours. To build for a new VRCX release right away, open **Actions → Build and release VRCX FewTags patcher → Run workflow**.
 
 Each patcher release includes a compressed, self-contained EXE and a `.sha256` checksum file. Releases are checked against the previous updater's 128 MB download limit so existing installations can update themselves. Patcher self-updates are opt-in: the app asks before downloading and replacing itself.
 

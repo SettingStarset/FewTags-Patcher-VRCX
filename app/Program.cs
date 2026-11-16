@@ -32,6 +32,7 @@ internal sealed class PatcherForm : Form
     private const string DataMarker = "<!-- FEWTAGS_DATA_PLACEHOLDER -->";
     private const int MaxDatabaseBytes = 32 * 1024 * 1024;
     private const int MaxUpdaterBytes = 256 * 1024 * 1024;
+    private const string BackupBuildFile = "vrcx-exe.sha256";
     private static readonly HttpClient Http = CreateHttpClient();
     private static readonly PayloadVariant[] PayloadVariants =
     {
@@ -68,7 +69,6 @@ internal sealed class PatcherForm : Form
         Font = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
         AutoScaleMode = AutoScaleMode.Dpi;
         AcceptButton = _apply;
-        CancelButton = _restore;
 
         var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(22), BackColor = Canvas };
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 105));
@@ -155,7 +155,20 @@ internal sealed class PatcherForm : Form
         _browse.TabIndex = 2;
         _path.TabIndex = 1;
         RefreshCompatibility();
+        DeleteLeftoverUpdateFiles();
         Shown += async (_, _) => await CheckForPatcherUpdateAsync();
+    }
+
+    private static void DeleteLeftoverUpdateFiles()
+    {
+        try
+        {
+            var temp = Path.GetTempPath();
+            foreach (var pattern in new[] { "VRCX-FewTags-Updater-*.exe", "VRCX-FewTags-Patcher-*.exe" })
+                foreach (var file in Directory.EnumerateFiles(temp, pattern))
+                    try { File.Delete(file); } catch { }
+        }
+        catch { }
     }
 
     private static Control CreateVersionCard(string channel, string repository, string releaseTag, Color accent)
@@ -239,7 +252,13 @@ internal sealed class PatcherForm : Form
             var v2Bytes = await DownloadDatabaseAsync("FewTagsv2.json");
             var legacyBytes = await DownloadDatabaseAsync("FewTags.json");
 
-            _status.Text = "Close VRCX if it is open…";
+            if (IsVrcxRunning() && MessageBox.Show(this, "VRCX is open. Close it now so FewTags can be applied?", "Close VRCX",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                _status.Text = "VRCX is still open. Close it, then apply the patch again.";
+                return;
+            }
+            _status.Text = "Closing VRCX…";
             if (!await StopRunningVrcxAsync())
             {
                 _status.Text = "VRCX is still open. Close it, then apply the patch again.";
@@ -283,6 +302,7 @@ internal sealed class PatcherForm : Form
                 File.Copy(previousPath, backupFile, overwrite: true);
             }
             await File.WriteAllTextAsync(Path.Combine(backupPath, "manifest.json"), JsonSerializer.Serialize(entries));
+            await File.WriteAllTextAsync(Path.Combine(backupPath, BackupBuildFile), HashFile(Path.Combine(target, "VRCX.exe")));
 
             try
             {
@@ -335,32 +355,61 @@ internal sealed class PatcherForm : Form
             MessageBox.Show(this, "Close VRCX before restoring its frontend files.", "VRCX is open", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
-        var backup = Directory.Exists(target)
-            ? Directory.EnumerateDirectories(target)
-                .Where(path =>
-                {
-                    var name = Path.GetFileName(path);
-                    var recognized = name.StartsWith("FewTagsVRCXExeBackup-", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("FewTagsVRCXBackup-", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("FewTagsVRCXScriptBackup-", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("FewTagsPatchBackup-", StringComparison.OrdinalIgnoreCase);
-                    return recognized && (File.Exists(Path.Combine(path, "manifest.json")) ||
-                        File.Exists(Path.Combine(path, "html", "index.html")));
-                })
-                .OrderByDescending(Directory.GetLastWriteTimeUtc)
-                .FirstOrDefault()
-            : null;
-        if (backup is null)
+        var backups = Directory.EnumerateDirectories(target)
+            .Where(path =>
+            {
+                var name = Path.GetFileName(path);
+                var recognized = name.StartsWith("FewTagsVRCXExeBackup-", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("FewTagsVRCXBackup-", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("FewTagsVRCXScriptBackup-", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("FewTagsPatchBackup-", StringComparison.OrdinalIgnoreCase);
+                return recognized && (File.Exists(Path.Combine(path, "manifest.json")) ||
+                    File.Exists(Path.Combine(path, "html", "index.html")));
+            })
+            .OrderByDescending(Directory.GetLastWriteTimeUtc)
+            .ToList();
+        if (backups.Count == 0)
         {
             MessageBox.Show(this, "No VRCX FewTags backup was found in that folder.", "Backup not found", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
+
+        var backup = backups[0];
+        var chain = new List<string> { backup };
+        var backupBuild = ReadBackupBuild(backup);
+        if (backupBuild is not null)
+        {
+            string installedBuild;
+            try { installedBuild = HashFile(Path.Combine(target, "VRCX.exe")); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Restore failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (!string.Equals(backupBuild, installedBuild, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this,
+                    "VRCX has been updated since FewTags was last applied, so the saved backup belongs to a different VRCX build. " +
+                    "Nothing was restored. If FewTags still shows, reinstall VRCX to get its original files.",
+                    "Backup is for another VRCX build", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            chain = backups.Where(path => File.Exists(Path.Combine(path, "manifest.json")) &&
+                string.Equals(ReadBackupBuild(path), installedBuild, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        if (MessageBox.Show(this, "Restore VRCX's original frontend files? FewTags will be removed until you apply it again.",
+                "Restore backup", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         try
         {
-            if (File.Exists(Path.Combine(backup, "manifest.json")))
-                RestoreBackup(backup, Path.Combine(target, "html"));
-            else
-                RestoreWholeHtmlBackup(backup, target);
+            foreach (var path in chain)
+            {
+                if (File.Exists(Path.Combine(path, "manifest.json")))
+                    RestoreBackup(path, Path.Combine(target, "html"));
+                else
+                    RestoreWholeHtmlBackup(path, target);
+            }
+            backup = chain[^1];
             _status.Text = $"Restored {Path.GetFileName(backup)}. Relaunch VRCX.";
             _compatibility.Text = $"Restored frontend backup · {Path.GetFileName(backup)}";
             _compatibility.ForeColor = Color.FromArgb(39, 137, 105);
@@ -370,6 +419,16 @@ internal sealed class PatcherForm : Form
         {
             MessageBox.Show(this, ex.Message, "Restore failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private static string? ReadBackupBuild(string backupPath)
+    {
+        try
+        {
+            var path = Path.Combine(backupPath, BackupBuildFile);
+            return File.Exists(path) ? File.ReadAllText(path).Trim() : null;
+        }
+        catch { return null; }
     }
 
     private bool TryGetInstall(out string target)
@@ -392,7 +451,8 @@ internal sealed class PatcherForm : Form
     private static string? FindInstall()
     {
         var processPath = Process.GetProcessesByName("VRCX")
-            .Select(process => { try { return process.MainModule?.FileName; } catch { return null; } })
+            .Select(process => { using (process) { try { return process.MainModule?.FileName; } catch { return null; } } })
+            .ToList()
             .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
         if (processPath is not null) return Path.GetDirectoryName(processPath);
         foreach (var candidate in new[] { @"C:\Program Files\VRCX", Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "VRCX") })
@@ -415,7 +475,7 @@ internal sealed class PatcherForm : Form
         if (matches.Length == 1) return matches[0];
 
         var supported = string.Join("\n", PayloadVariants.Select(variant =>
-            $"• {variant.Channel}: {variant.ReleaseTag} (VRCX package {variant.PackageVersion})"));
+            $"• {variant.Channel}: {variant.ReleaseTag}"));
         throw new UnsupportedBuildException(
             $"This VRCX executable does not match either bundled frontend. No files were changed.\n\n" +
             $"Detected VRCX.exe SHA-256: {exeHash}\nDetected VRCX.dll SHA-256: {dllHash}\n\n" +

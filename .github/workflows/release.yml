@@ -2,6 +2,8 @@ name: Build and release VRCX FewTags patcher
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'app/**'
       - 'integration/**'
