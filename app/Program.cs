@@ -303,6 +303,16 @@ internal sealed class PatcherForm : Form
             _compatibility.Text = $"{variant.Channel} build patched · {variant.ReleaseTag} · restart VRCX to see your tags.";
             _toolTip.SetToolTip(_status, $"Backup saved to {backupPath}");
         }
+        catch (UnsupportedBuildException ex)
+        {
+            _status.Text = "Checking GitHub for a patcher that supports this VRCX build…";
+            var advice = await DescribeUnsupportedBuildAsync();
+            _status.Text = "The patch could not be completed.";
+            _compatibility.Text = advice.Summary;
+            _compatibility.ForeColor = Color.FromArgb(180, 74, 70);
+            MessageBox.Show(this, ex.Message + "\n\n" + advice.Detail, "Patch failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (advice.NewerPatcherAvailable) await CheckForPatcherUpdateAsync();
+        }
         catch (Exception ex)
         {
             _status.Text = "The patch could not be completed.";
@@ -406,10 +416,63 @@ internal sealed class PatcherForm : Form
 
         var supported = string.Join("\n", PayloadVariants.Select(variant =>
             $"• {variant.Channel}: {variant.ReleaseTag} (VRCX package {variant.PackageVersion})"));
-        throw new InvalidOperationException(
+        throw new UnsupportedBuildException(
             $"This VRCX executable does not match either bundled frontend. No files were changed.\n\n" +
             $"Detected VRCX.exe SHA-256: {exeHash}\nDetected VRCX.dll SHA-256: {dllHash}\n\n" +
-            $"This patcher supports these exact builds:\n{supported}\n\nUpdate VRCX to one of those releases, then apply again.");
+            $"This patcher supports these exact builds:\n{supported}");
+    }
+
+    private async Task<UnsupportedBuildAdvice> DescribeUnsupportedBuildAsync()
+    {
+        const string updateVrcx = "update VRCX to one of those releases, then apply again.";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            if (!string.Equals(PatcherBuildInfo.PatcherRepository, "unset", StringComparison.Ordinal))
+            {
+                var patcherTag = await GetLatestReleaseTagAsync(PatcherBuildInfo.PatcherRepository, timeout.Token);
+                if (SelfUpdater.IsNewerPatcherTag(patcherTag, PatcherBuildInfo.PatcherVersion))
+                    return new UnsupportedBuildAdvice(
+                        "A newer patcher is available · install it, then apply again.",
+                        $"A newer patcher ({patcherTag}) is available and may support this VRCX build. Install it, then apply again.",
+                        NewerPatcherAvailable: true);
+            }
+
+            var newer = new List<string>();
+            foreach (var (variant, repository) in new[] { (PayloadVariants[0], "Natsumi-sama/VRCX"), (PayloadVariants[1], "vrcx-team/VRCX") })
+            {
+                var upstreamTag = await GetLatestReleaseTagAsync(repository, timeout.Token);
+                if (!string.IsNullOrWhiteSpace(upstreamTag) && !string.Equals(upstreamTag, variant.ReleaseTag, StringComparison.OrdinalIgnoreCase))
+                    newer.Add($"• {variant.Channel}: {upstreamTag}");
+            }
+            if (newer.Count > 0)
+                return new UnsupportedBuildAdvice(
+                    "VRCX has a newer release than this patcher · its patcher is not published yet.",
+                    "VRCX has published a release this patcher does not include yet:\n" + string.Join("\n", newer) + "\n\n" +
+                    "If you are on that release, a matching patcher is built automatically, usually within a few hours. " +
+                    "Reopen the patcher later and it will offer the update.",
+                    NewerPatcherAvailable: false);
+
+            return new UnsupportedBuildAdvice("Build not recognized · update VRCX to a supported release.",
+                "This is not the latest stable or nightly VRCX release, so " + updateVrcx, NewerPatcherAvailable: false);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine(ex);
+            return new UnsupportedBuildAdvice(
+                "Build not recognized · could not check GitHub for newer releases.",
+                "Could not check GitHub for newer releases. If VRCX updated recently, a matching patcher may not be published yet, " +
+                "so reopen the patcher later. Otherwise, " + updateVrcx,
+                NewerPatcherAvailable: false);
+        }
+    }
+
+    private static async Task<string?> GetLatestReleaseTagAsync(string repository, CancellationToken cancellationToken)
+    {
+        using var response = await Http.GetAsync($"https://api.github.com/repos/{repository}/releases/latest", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        using var release = JsonDocument.Parse(await response.Content.ReadAsStreamAsync(cancellationToken));
+        return release.RootElement.TryGetProperty("tag_name", out var tag) ? tag.GetString() : null;
     }
 
     private static string HashFile(string path)
@@ -664,6 +727,11 @@ internal sealed class PatcherForm : Form
         UseWaitCursor = busy;
     }
 
+    private sealed record UnsupportedBuildAdvice(string Summary, string Detail, bool NewerPatcherAvailable);
+    private sealed class UnsupportedBuildException : InvalidOperationException
+    {
+        public UnsupportedBuildException(string message) : base(message) { }
+    }
     private sealed record PayloadVariant(string Channel, string ReleaseTag, string PackageVersion, string ExeSha256, string DllSha256, string ResourceName);
     private sealed record PayloadFile(string SourcePath, string RelativePath);
     private sealed record BackupEntry(string RelativePath, bool HadOriginal);

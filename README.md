@@ -36,13 +36,15 @@ The patcher updates the frontend files in the VRCX folder you select. It does no
 
 The default install folder is `C:\Program Files\VRCX`. If Windows denies access, run the patcher as administrator. The patcher only supports the exact VRCX builds bundled into that release; update the patcher after VRCX updates.
 
+If VRCX has just updated, the matching patcher may not be published yet. When you apply to a build it doesn't recognize, the patcher checks GitHub. It then tells you whether a newer patcher is ready to install, whether VRCX has a release that hasn't been built yet (try again in a few hours), or whether your VRCX build is simply unsupported.
+
 ## Restore the original frontend
 
 Close VRCX, open the patcher, select the same install folder, then choose **Restore backup**. The restore option recognizes both current per-file backups and earlier full-frontend backups.
 
 ## How releases stay current
 
-GitHub Actions checks both VRCX repositories every four hours and also runs when the patcher or integration source changes. It builds the FewTags frontend against each latest release, verifies both builds, then publishes a new patcher with the matching executable and library fingerprints. A failed or incompatible build is not released.
+GitHub Actions checks both VRCX repositories on a 15-minute schedule and also runs when the patcher or integration source changes. GitHub runs scheduled workflows on a best-effort basis, so checks can be delayed by several hours. To publish a build for a new VRCX release right away, open **Actions → Build and release VRCX FewTags patcher → Run workflow**. It builds the FewTags frontend against each latest release, verifies both builds, then publishes a new patcher with the matching executable and library fingerprints. A failed or incompatible build is not released.
 
 Each patcher release includes a compressed, self-contained EXE and a `.sha256` checksum file. Releases are checked against the previous updater's 128 MB download limit so existing installations can update themselves. Patcher self-updates are opt-in: the app asks before downloading and replacing itself.
 
